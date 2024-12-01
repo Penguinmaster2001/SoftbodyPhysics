@@ -1,6 +1,7 @@
-[gd_scene load_steps=3 format=3 uid="uid://cjnl8pxwldrkb"]
+[gd_scene load_steps=4 format=3 uid="uid://cjnl8pxwldrkb"]
 
 [ext_resource type="Script" path="res://SoftbodyPhysics/SoftbodyMesh.cs" id="1_3lrfq"]
+[ext_resource type="ArrayMesh" uid="uid://cm2r5dobupyo3" path="res://Meshes/icosphere.obj" id="2_6kyrb"]
 
 [sub_resource type="StandardMaterial3D" id="StandardMaterial3D_q4sy3"]
 cull_mode = 2
@@ -10,7 +11,7 @@ cull_mode = 2
 [node name="MeshInstance3D" type="MeshInstance3D" parent="."]
 material_override = SubResource("StandardMaterial3D_q4sy3")
 script = ExtResource("1_3lrfq")
-_k = 2.0
-_radius = 1.0
-_pointMasses = 0.1
+_k = 10.0
+_vertexMass = 0.1
 _damping = 0.1
+_baseMesh = ExtResource("2_6kyrb")
