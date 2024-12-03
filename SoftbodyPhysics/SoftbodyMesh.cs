@@ -19,6 +19,9 @@ public partial class SoftbodyMesh : MeshInstance3D
 
     private readonly RandomNumberGenerator _rng = new();
 
+    [Export]
+    public SoftbodyEnvironment Environment;
+
     private ImmediateMesh _mesh;
 
     [Export]
@@ -40,7 +43,16 @@ public partial class SoftbodyMesh : MeshInstance3D
     private float _pressureConstant;
 
     [Export]
+    private float _pressure;
+
+    [Export]
     private float _startVolume;
+
+    [Export]
+    private float _volume;
+
+    [Export]
+    private float _surfaceArea;
 
     [Export]
     private float _mols;
@@ -49,10 +61,16 @@ public partial class SoftbodyMesh : MeshInstance3D
     private float _temperature;
 
     [Export]
-    private float _dragMultiplier;
+    private float _skinThermalConductivity;
 
     [Export]
-    private float _gravity;
+    private float _gasMolDensity;
+
+    [Export]
+    private float _gasMass;
+
+    [Export]
+    private float _dragMultiplier;
 
     [Export]
     private int _subSteps;
@@ -243,7 +261,7 @@ public partial class SoftbodyMesh : MeshInstance3D
         {
             _mesh.ClearSurfaces();
             CalculateSprings();
-            CalculateInternalPressure();
+            CalculateInternalPressure((float)(delta / _subSteps));
             UpdateVerts((float)(delta / _subSteps));
         }
         if (render) UpdateMesh();
@@ -288,12 +306,12 @@ public partial class SoftbodyMesh : MeshInstance3D
 
 
 
-    private void CalculateInternalPressure()
+    private void CalculateInternalPressure(float delta)
     {
-        // PV = nRT
-        // P = nRT / V
-        
-        float pressure = _mols * _pressureConstant * _temperature / CalculateVolume();
+        float newVolume = Mathf.Max(CalculateVolume(), _epsilon);
+        _pressure = _mols * _pressureConstant * _temperature / newVolume;
+
+        _surfaceArea = 0.0f;
         
         for (int faceIndex = 0; faceIndex < _faces.Length; faceIndex++)
         {
@@ -306,17 +324,16 @@ public partial class SoftbodyMesh : MeshInstance3D
                             (_vertices[face.V0].Position +
                              _vertices[face.V1].Position +
                              _vertices[face.V2].Position);
-
-            // float area = 0.5f * (v2 - v0).Cross(v1 - v0).Length();
             
             // The length of this is twice the area of the tri
             // The direction is the normal of the tri
             Vector3 cross = (v2 - v0).Cross(v1 - v0);
-            Vector3 dragForce = aveVel * (_dragMultiplier * cross.Length() * -aveVel.Length());
+            float area = 0.5f * cross.Length();
+            _surfaceArea += area;
 
-            // Vector3 normal = (v2 - v0).Cross(v1 - v0).Normalized();
-            // Vector3 pressureForce = normal * (2.0f * pressure / normal.LengthSquared());
-            Vector3 pressureForce = cross * (0.5f * pressure);
+            Vector3 dragForce = aveVel * (_dragMultiplier * Environment.AirDensity * area * -aveVel.Length());
+
+            Vector3 pressureForce = cross * (0.5f * _pressure);
             _vertices[face.V0].Force += 0.3333f * (pressureForce + dragForce);
             _vertices[face.V1].Force += 0.3333f * (pressureForce + dragForce);
             _vertices[face.V2].Force += 0.3333f * (pressureForce + dragForce);
@@ -325,6 +342,11 @@ public partial class SoftbodyMesh : MeshInstance3D
             if (Mathf.IsNaN(_vertices[face.V1].Force.Length())) GD.Print("Pressure v1");
             if (Mathf.IsNaN(_vertices[face.V2].Force.Length())) GD.Print("Pressure v2");
         }
+
+
+
+        _temperature += 2.0f * (_surfaceArea * delta * (Environment.AirTemperature - _temperature) - _pressure * (newVolume - _volume)) / (3.0f * _mols * _pressureConstant);
+        _volume = newVolume;
     }
 
 
@@ -364,8 +386,7 @@ public partial class SoftbodyMesh : MeshInstance3D
                 error = true;
             }
             
-            _vertices[vert].Force += _vertices[vert].Mass * _gravity * Vector3.Down;
-            _vertices[vert].Force += _vertices[vert].Velocity * (_dragMultiplier * -_vertices[vert].Velocity.Length());
+            _vertices[vert].Force += _vertices[vert].Mass * Environment.Gravity;
 
             if (ToGlobal(_vertices[vert].Position).Y < 0.0f)
             {
