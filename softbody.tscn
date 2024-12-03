@@ -1,17 +1,31 @@
-[gd_scene load_steps=4 format=3 uid="uid://cjnl8pxwldrkb"]
+[gd_scene load_steps=5 format=3 uid="uid://cjnl8pxwldrkb"]
 
 [ext_resource type="Script" path="res://SoftbodyPhysics/SoftbodyMesh.cs" id="1_3lrfq"]
-[ext_resource type="ArrayMesh" uid="uid://cm2r5dobupyo3" path="res://Meshes/icosphere.obj" id="2_6kyrb"]
+[ext_resource type="ArrayMesh" uid="uid://cm2r5dobupyo3" path="res://Meshes/icosphere.obj" id="2_nfo3d"]
 
 [sub_resource type="StandardMaterial3D" id="StandardMaterial3D_q4sy3"]
 cull_mode = 2
+vertex_color_use_as_albedo = true
+
+[sub_resource type="StandardMaterial3D" id="StandardMaterial3D_boec2"]
+cull_mode = 2
+shading_mode = 0
+vertex_color_use_as_albedo = true
+albedo_color = Color(1, 0, 0, 1)
 
 [node name="Softbody" type="Node3D"]
 
 [node name="MeshInstance3D" type="MeshInstance3D" parent="."]
 material_override = SubResource("StandardMaterial3D_q4sy3")
 script = ExtResource("1_3lrfq")
-_k = 10.0
-_vertexMass = 0.1
-_damping = 0.1
-_baseMesh = ExtResource("2_6kyrb")
+_baseMesh = ExtResource("2_nfo3d")
+_springMat = SubResource("StandardMaterial3D_boec2")
+_k = 5.0
+_vertexMass = 1.0
+_damping = 0.05
+_pressureConstant = 10.0
+_mols = 1.0
+_temperature = 1.0
+_dragMultiplier = 0.05
+_gravity = 1.0
+_subSteps = 5

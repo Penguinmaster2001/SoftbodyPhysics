@@ -1,0 +1,22 @@
+[remap]
+
+importer="wavefront_obj"
+importer_version=1
+type="Mesh"
+uid="uid://b07i52pdcnk8h"
+path="res://.godot/imported/cubeSubdivide.obj-38aca365e2d059e8139d5b9d09ccceee.mesh"
+
+[deps]
+
+files=["res://.godot/imported/cubeSubdivide.obj-38aca365e2d059e8139d5b9d09ccceee.mesh"]
+
+source_file="res://Meshes/cubeSubdivide.obj"
+dest_files=["res://.godot/imported/cubeSubdivide.obj-38aca365e2d059e8139d5b9d09ccceee.mesh", "res://.godot/imported/cubeSubdivide.obj-38aca365e2d059e8139d5b9d09ccceee.mesh"]
+
+[params]
+
+generate_tangents=true
+scale_mesh=Vector3(1, 1, 1)
+offset_mesh=Vector3(0, 0, 0)
+optimize_mesh=true
+force_disable_mesh_compression=false

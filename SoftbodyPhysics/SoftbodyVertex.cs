@@ -23,6 +23,6 @@ public struct SoftbodyVertex : IVertex
 
     public override readonly string ToString()
     {
-        return $"SoftbodyVertex at {Position}. Velocity: {Velocity}. Mass: {Mass}. Springs: {string.Join("\t", Springs)}.";
+        return $"SoftbodyVertex at {Position}\tVelocity: {Velocity}\tForce: {Force}\tMass: {Mass}\tSprings: {string.Join("\t", Springs)}.";
     }
 }

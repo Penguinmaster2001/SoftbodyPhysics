@@ -1,0 +1,22 @@
+[remap]
+
+importer="wavefront_obj"
+importer_version=1
+type="Mesh"
+uid="uid://cmfg2b2jrm3x4"
+path="res://.godot/imported/icosphere5.obj-0dd0573258996ba6aa4295ef2dd3d679.mesh"
+
+[deps]
+
+files=["res://.godot/imported/icosphere5.obj-0dd0573258996ba6aa4295ef2dd3d679.mesh"]
+
+source_file="res://Meshes/icosphere5.obj"
+dest_files=["res://.godot/imported/icosphere5.obj-0dd0573258996ba6aa4295ef2dd3d679.mesh", "res://.godot/imported/icosphere5.obj-0dd0573258996ba6aa4295ef2dd3d679.mesh"]
+
+[params]
+
+generate_tangents=true
+scale_mesh=Vector3(1, 1, 1)
+offset_mesh=Vector3(0, 0, 0)
+optimize_mesh=true
+force_disable_mesh_compression=false
