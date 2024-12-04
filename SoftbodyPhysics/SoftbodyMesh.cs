@@ -34,7 +34,7 @@ public partial class SoftbodyMesh : MeshInstance3D
     private float _k;
 
     [Export]
-    private float _vertexMass;
+    private float _initialSkinAreaMass;
 
     [Export]
     private float _damping;
@@ -75,6 +75,9 @@ public partial class SoftbodyMesh : MeshInstance3D
     [Export]
     private int _subSteps;
 
+    [Export]
+    private double _timeSpeed;
+
     private const float _epsilon = 0.001f;
     private const float _epsilonSquared = 0.0001f;
 
@@ -107,7 +110,7 @@ public partial class SoftbodyMesh : MeshInstance3D
                 UV = meshDataTool.GetVertexUV(vert),
                 Normal = meshDataTool.GetVertexNormal(vert),
                 Springs = Array.Empty<Spring>(),
-                Mass = _vertexMass
+                Mass = 0.0f
             };
         }
 
@@ -119,6 +122,15 @@ public partial class SoftbodyMesh : MeshInstance3D
                 V1 = meshDataTool.GetFaceVertex(face, 1),
                 V2 = meshDataTool.GetFaceVertex(face, 2)
             };
+            Vector3 v0 = _vertices[_faces[face].V0].Position;
+            Vector3 v1 = _vertices[_faces[face].V1].Position;
+            Vector3 v2 = _vertices[_faces[face].V2].Position;
+
+            float faceMassPerVert = 0.3333f * _initialSkinAreaMass * 0.5f * (v2 - v0).Cross(v1 - v0).Length();
+
+            _vertices[_faces[face].V0].Mass += faceMassPerVert;
+            _vertices[_faces[face].V1].Mass += faceMassPerVert;
+            _vertices[_faces[face].V2].Mass += faceMassPerVert;
         }
         
 
@@ -256,13 +268,15 @@ public partial class SoftbodyMesh : MeshInstance3D
     public override void _PhysicsProcess(double delta)
     {
         if (error) return;
+        GD.Print("frame");
 
         for (int subStep = 0; subStep < _subSteps; subStep++)
         {
             _mesh.ClearSurfaces();
+            _gasMass = _mols * _gasMolDensity;
             CalculateSprings();
             CalculateInternalPressure((float)(delta / _subSteps));
-            UpdateVerts((float)(delta / _subSteps));
+            UpdateVerts((float)(_timeSpeed * delta / _subSteps));
         }
         if (render) UpdateMesh();
     }
@@ -308,7 +322,7 @@ public partial class SoftbodyMesh : MeshInstance3D
 
     private void CalculateInternalPressure(float delta)
     {
-        float newVolume = Mathf.Max(CalculateVolume(), _epsilon);
+        float newVolume = CalculateVolume();
         _pressure = _mols * _pressureConstant * _temperature / newVolume;
 
         _surfaceArea = 0.0f;
@@ -321,9 +335,9 @@ public partial class SoftbodyMesh : MeshInstance3D
             Vector3 v2 = _vertices[face.V2].Position;
 
             Vector3 aveVel = 0.3333f * 
-                            (_vertices[face.V0].Position +
-                             _vertices[face.V1].Position +
-                             _vertices[face.V2].Position);
+                            (_vertices[face.V0].Velocity +
+                             _vertices[face.V1].Velocity +
+                             _vertices[face.V2].Velocity);
             
             // The length of this is twice the area of the tri
             // The direction is the normal of the tri
@@ -338,7 +352,22 @@ public partial class SoftbodyMesh : MeshInstance3D
             _vertices[face.V1].Force += 0.3333f * (pressureForce + dragForce);
             _vertices[face.V2].Force += 0.3333f * (pressureForce + dragForce);
 
-            if (Mathf.IsNaN(_vertices[face.V0].Force.Length())) GD.Print("Pressure v0");
+
+            if (Mathf.IsNaN(_vertices[face.V0].Force.Length()))
+            {
+                GD.Print("Pressure v0");
+                GD.Print($"mols: {_mols}");
+                GD.Print($"_pressureConstant: {_pressureConstant}");
+                GD.Print($"_temperature: {_temperature}");
+                GD.Print($"newVolume: {newVolume}");
+                GD.Print($"_pressure: {_pressure}");
+                GD.Print($"cross: {cross}");
+                GD.Print($"pressureForce: {pressureForce}");
+                GD.Print($"dragForce: {dragForce}");
+                GD.Print($"aveVel: {aveVel}");
+                GD.Print($"area: {area}");
+            }
+            
             if (Mathf.IsNaN(_vertices[face.V1].Force.Length())) GD.Print("Pressure v1");
             if (Mathf.IsNaN(_vertices[face.V2].Force.Length())) GD.Print("Pressure v2");
         }
@@ -361,16 +390,40 @@ public partial class SoftbodyMesh : MeshInstance3D
             Vector3 v1 = _vertices[face.V1].Position;
             Vector3 v2 = _vertices[face.V2].Position;
             totalVolume += v2.Dot(v1.Cross(v0));
+
+            if (Mathf.IsNaN(totalVolume))
+            {
+                GD.Print($"\n\n\nTotal volume face index: {faceIndex}");
+                GD.Print(_vertices[face.V0].Position);
+                GD.Print(_vertices[face.V1].Position);
+                GD.Print(_vertices[face.V2].Position);
+                GD.Print(v1.Cross(v0));
+                GD.Print(v2.Dot(v1.Cross(v0)));
+            }
+            if (Mathf.IsNaN(_vertices[face.V0].Position.Length())) GD.Print($"Volume v0: {face.V0}");
+            if (Mathf.IsNaN(_vertices[face.V1].Position.Length())) GD.Print($"Volume v1: {face.V1}");
+            if (Mathf.IsNaN(_vertices[face.V2].Position.Length())) GD.Print($"Volume v2: {face.V2}");
         }
 
-        // GD.Print($"Volume {totalVolume}");
+        return Mathf.Max(0.16667f * totalVolume, _epsilon);
+    }
 
-        if (totalVolume < 6.0f * _epsilon)
+
+
+    private float CalculateSurfaceArea()
+    {
+        float surfaceArea = 0.0f;
+        for (int faceIndex = 0; faceIndex < _faces.Length; faceIndex++)
         {
-            return _epsilon;
+            SoftbodyFace face = _faces[faceIndex];
+            Vector3 v0 = _vertices[face.V0].Position;
+            Vector3 v1 = _vertices[face.V1].Position;
+            Vector3 v2 = _vertices[face.V2].Position;
+
+            surfaceArea += (v2 - v0).Cross(v1 - v0).Length();
         }
 
-        return 0.16667f * totalVolume;
+        return 0.5f * surfaceArea;
     }
 
 
@@ -386,28 +439,49 @@ public partial class SoftbodyMesh : MeshInstance3D
                 error = true;
             }
             
-            _vertices[vert].Force += _vertices[vert].Mass * Environment.Gravity;
+            // Gravity per vertex
+            _vertices[vert].Force += (_vertices[vert].Mass + _gasMass / _vertices.Length) * Environment.Gravity;
+
+            // Buoyancy per vertex
+            _vertices[vert].Force += Environment.AirDensity * _volume / -_vertices.Length * Environment.Gravity;
 
             if (ToGlobal(_vertices[vert].Position).Y < 0.0f)
             {
+                _vertices[vert].Force *= 0.5f;
                 _vertices[vert].Force += 1.5f * _vertices[vert].Force.Y *_vertices[vert].Mass * ToGlobal(_vertices[vert].Position).Y * Vector3.Up;
-                
-                // _vertices[vert].Position = new(_vertices[vert].Position.X, 0.0f, _vertices[vert].Position.Z);
-                // _vertices[vert].Velocity = new(_vertices[vert].Velocity.X, -0.25f * _vertices[vert].Velocity.Y, _vertices[vert].Velocity.Z);
             }
 
-            Vector3 da = _vertices[vert].Force * (delta  / _vertices[vert].Mass);
-            _vertices[vert].Position += (_vertices[vert].Velocity + da * 0.5f) * delta;
+            // Vector3 da = ;
+            // _vertices[vert].Position += (_vertices[vert].Velocity + da * 0.5f) * delta;
+            // _vertices[vert].Velocity += da;
+            (_vertices[vert].Position, _vertices[vert].Velocity) = RK4Integration(_vertices[vert].Position, _vertices[vert].Velocity);
+
+            _vertices[vert].Force = Vector3.Zero;
 
             if (ToGlobal(_vertices[vert].Position).Y < 0.0f)
             {
                 _vertices[vert].Position = ToLocal(ToGlobal(_vertices[vert].Position) * new Vector3(1.0f, 0.0f, 1.0f));
             }
 
-            // var collision = GetWorld3D().DirectSpaceState.IntersectRay(PhysicsRayQueryParameters3D.Create(ToGlobal(_vertices[vert].Position), ToGlobal(_vertices[vert].Position + _vertices[vert].Velocity * delta)));
 
-            _vertices[vert].Velocity += da;
-            _vertices[vert].Force = Vector3.Zero;
+            (Vector3, Vector3) RK4Integration(Vector3 pos, Vector3 vel)
+            {
+                (Vector3 k1Pos, Vector3 k1Vel) = Derivatives(pos, vel);
+                (Vector3 k2Pos, Vector3 k2Vel) = Derivatives(pos + (0.5f * delta * k1Pos), vel + (0.5f * delta * k1Vel));
+                (Vector3 k3Pos, Vector3 k3Vel) = Derivatives(pos + (0.5f * delta * k2Pos), vel + (0.5f * delta * k2Vel));
+                (Vector3 k4Pos, Vector3 k4Vel) = Derivatives(pos + (delta * k3Pos), vel + (delta * k3Vel));
+                pos += (delta / 6.0f) * (k1Pos + (2.0f * k2Pos) + (2.0f * k3Pos) + k4Pos);
+                vel += (delta / 6.0f) * (k1Vel + (2.0f * k2Vel) + (2.0f * k3Vel) + k4Vel);
+                return (pos, vel);
+            }
+
+
+            // Returns derivatives of position and velocity as (velocity, acceleration)
+            (Vector3, Vector3) Derivatives(Vector3 position, Vector3 velocity)
+            {
+                Vector3 acc = _vertices[vert].Force / _vertices[vert].Mass;
+                return (velocity, acc);
+            }
         }
     }
 
