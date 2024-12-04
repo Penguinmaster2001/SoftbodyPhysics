@@ -12,10 +12,9 @@ namespace GodotSoftbodyPhysics.SoftbodyPhysics;
 
 public partial class SoftbodyMesh : MeshInstance3D
 {
-    private SoftbodyVertex[] _vertices = Array.Empty<SoftbodyVertex>();
+    private SoftbodyState _state;
     private SoftbodyFace[] _faces = Array.Empty<SoftbodyFace>();
     private int[] _meshIndices = Array.Empty<int>();
-    private readonly List<int> _softbodyIndices = new();
 
     private readonly RandomNumberGenerator _rng = new();
 
@@ -102,74 +101,56 @@ public partial class SoftbodyMesh : MeshInstance3D
         meshDataTool.CreateFromSurface(arrayMesh, 0);
 
 
-        _vertices = new SoftbodyVertex[meshDataTool.GetVertexCount()];
+        SoftbodyVertex[] vertices = new SoftbodyVertex[meshDataTool.GetVertexCount()];
         for (int vert = 0; vert < meshDataTool.GetVertexCount(); vert++)
         {
-            _vertices[vert] = new() {
+            vertices[vert] = new() {
                 Position = meshDataTool.GetVertex(vert),
                 UV = meshDataTool.GetVertexUV(vert),
                 Normal = meshDataTool.GetVertexNormal(vert),
-                Springs = Array.Empty<Spring>(),
                 Mass = 0.0f
             };
         }
+        _state.Vertices = vertices;
+        
 
-        _faces = new SoftbodyFace[meshDataTool.GetFaceCount()];
+        Spring[] springs = new Spring[meshDataTool.GetEdgeCount()];
+        for (int edge = 0; edge < meshDataTool.GetEdgeCount(); edge++)
+        {
+            int startVert = meshDataTool.GetEdgeVertex(edge, 0);
+            int endVert = meshDataTool.GetEdgeVertex(edge, 1);
+
+            springs[edge] = new() {
+                    StartVertex = startVert,
+                    EndVertex = endVert,
+                    Stiffness = _k,
+                    Dampening = _damping,
+                    TargetLength = meshDataTool.GetVertex(startVert)
+                                               .DistanceTo(meshDataTool.GetVertex(endVert))
+                };
+        }
+        _state.Springs = springs;
+
+
+        SoftbodyFace[] faces = new SoftbodyFace[meshDataTool.GetFaceCount()];
         for (int face = 0; face < meshDataTool.GetFaceCount(); face++)
         {
-            _faces[face] = new() {
+            faces[face] = new() {
                 V0 = meshDataTool.GetFaceVertex(face, 0),
                 V1 = meshDataTool.GetFaceVertex(face, 1),
                 V2 = meshDataTool.GetFaceVertex(face, 2)
             };
-            Vector3 v0 = _vertices[_faces[face].V0].Position;
-            Vector3 v1 = _vertices[_faces[face].V1].Position;
-            Vector3 v2 = _vertices[_faces[face].V2].Position;
+            Vector3 v0 = vertices[faces[face].V0].Position;
+            Vector3 v1 = vertices[faces[face].V1].Position;
+            Vector3 v2 = vertices[faces[face].V2].Position;
 
             float faceMassPerVert = 0.3333f * _initialSkinAreaMass * 0.5f * (v2 - v0).Cross(v1 - v0).Length();
 
-            _vertices[_faces[face].V0].Mass += faceMassPerVert;
-            _vertices[_faces[face].V1].Mass += faceMassPerVert;
-            _vertices[_faces[face].V2].Mass += faceMassPerVert;
+            vertices[faces[face].V0].Mass += faceMassPerVert;
+            vertices[faces[face].V1].Mass += faceMassPerVert;
+            vertices[faces[face].V2].Mass += faceMassPerVert;
         }
-        
-
-        _softbodyIndices.Clear();
-        HashSet<(int, int)> edgesVisited = new();
-        for (int currentVert = 0; currentVert < meshDataTool.GetVertexCount(); currentVert++)
-        {
-            Vector3 currentVertPos = meshDataTool.GetVertex(currentVert);
-
-            List<Spring> vertexSprings = new();
-            foreach (int edge in meshDataTool.GetVertexEdges(currentVert))
-            {
-                int otherVert = meshDataTool.GetEdgeVertex(edge, 0);
-                if (otherVert == currentVert)
-                {
-                    otherVert = meshDataTool.GetEdgeVertex(edge, 1);
-                }
-
-                if (!edgesVisited.Contains((otherVert, currentVert)))
-                {
-                    edgesVisited.Add((currentVert, otherVert));
-                    edgesVisited.Add((otherVert, currentVert));
-
-                    vertexSprings.Add(new()
-                    {
-                        StartVertex = currentVert,
-                        EndVertex = otherVert,
-                        Stiffness = _k,
-                        Dampening = _damping,
-                        TargetLength = meshDataTool.GetVertex(otherVert).DistanceTo(currentVertPos)
-                    });
-                }
-            }
-
-            _softbodyIndices.Add(currentVert);
-            SoftbodyVertex vertex = _vertices[currentVert];
-            vertex.Springs = vertexSprings.ToArray();
-            _vertices[currentVert] = vertex;
-        }
+        _faces = faces;
 
 
         _mesh = new();
@@ -272,13 +253,35 @@ public partial class SoftbodyMesh : MeshInstance3D
 
         for (int subStep = 0; subStep < _subSteps; subStep++)
         {
-            _mesh.ClearSurfaces();
-            _gasMass = _mols * _gasMolDensity;
-            CalculateSprings();
-            CalculateInternalPressure((float)(delta / _subSteps));
-            UpdateVerts((float)(_timeSpeed * delta / _subSteps));
+            UpdateRk4((float)(_timeSpeed * delta / _subSteps));
         }
-        if (render) UpdateMesh();
+
+        if (render) UpdateMesh(_state.Vertices);
+        else ShowSprings();
+    }
+
+
+
+    private void UpdateRk4(float dt)
+    {
+        SoftbodyState k1 = CalculateDerivatives(_state);
+        SoftbodyState k2 = CalculateDerivatives(_state + (0.5f * dt * k1));
+        SoftbodyState k3 = CalculateDerivatives(_state + (0.5f * dt * k2));
+        SoftbodyState k4 = CalculateDerivatives(_state + (dt * k3));
+
+        _state += dt / 6.0f * (k1 + (2.0f * k2) + (2.0f * k3) + k4);
+    }
+
+
+
+    private SoftbodyState CalculateDerivatives(SoftbodyState state)
+    {
+        SoftbodyState newState = state;
+        CalculateSprings(newState);
+        CalculateInternalPressure(newState);
+        CalculateEnvironment(newState);
+        
+        return newState;
     }
 
 
@@ -302,25 +305,61 @@ public partial class SoftbodyMesh : MeshInstance3D
 
 
 
-    private void CalculateSprings()
+    private void CalculateSprings(SoftbodyState state)
     {
-        _mesh.SurfaceBegin(Mesh.PrimitiveType.Lines, _springMat);
-
-        for (int vert = 0; vert < _softbodyIndices.Count; vert++)
+        for (int springIndex = 0; springIndex < state.Springs.Length; springIndex++)
         {
-            int index = _softbodyIndices[vert];
-            for (int spring = 0; spring < _vertices[index].Springs.Length; spring++)
-            {
-                ApplySpring(_vertices[index].Springs[spring]);
-            }
-        }
+            Spring spring = state.Springs[springIndex];
 
-        _mesh.SurfaceEnd();
+            spring.Stiffness = _k;
+            spring.Dampening = _damping;
+
+
+            SoftbodyVertex startVertex = state.Vertices[spring.StartVertex];
+            SoftbodyVertex endVertex = state.Vertices[spring.EndVertex];
+            
+            Vector3 springVector = startVertex.Position - endVertex.Position;
+            float springLength = springVector.Length();
+            if (springLength < _epsilon)
+            {
+                springLength = _epsilon;
+            }
+
+            Vector3 springDirection = springVector / springLength;
+            Vector3 hookesFactor = spring.Stiffness * (spring.TargetLength - springLength) * springDirection;
+
+            Vector3 startVertDampingVel = springDirection.LengthSquared() < _epsilonSquared ? Vector3.Zero : -startVertex.Velocity.Project(springDirection);
+            Vector3 endVertDampingVel = springDirection.LengthSquared() < _epsilonSquared ? Vector3.Zero : -endVertex.Velocity.Project(springDirection);
+
+            startVertex.Force += hookesFactor + spring.Dampening * startVertDampingVel;
+            endVertex.Force += -hookesFactor + spring.Dampening * endVertDampingVel;
+
+            state.Vertices[spring.StartVertex] = startVertex;
+            state.Vertices[spring.EndVertex] = endVertex;
+
+            if (Mathf.IsNaN(state.Vertices[spring.StartVertex].Force.Length()))
+            {
+                GD.Print("Spring start");
+                GD.Print($"sv: {springVector}\tsl: {springLength}\tsd: {springDirection}\thf: {hookesFactor}\tsvdv: {startVertDampingVel}\tsvf: {startVertex.Force}\tsvv: {startVertex.Velocity}\tnsvv: {-startVertex.Velocity}");
+
+            }
+            if (Mathf.IsNaN(state.Vertices[spring.EndVertex].Force.Length())) GD.Print("Spring end");
+
+            _mesh.SurfaceSetNormal(startVertex.Normal);
+            _mesh.SurfaceSetUV(startVertex.UV);
+            _mesh.SurfaceSetColor(new(0.01f * springLength / spring.TargetLength, 0.5f, 0.1f));
+            _mesh.SurfaceAddVertex(startVertex.Position);
+
+            _mesh.SurfaceSetNormal(endVertex.Normal);
+            _mesh.SurfaceSetUV(endVertex.UV);
+            _mesh.SurfaceSetColor(new(0.01f * springLength / spring.TargetLength, 0.5f, 0.1f));
+            _mesh.SurfaceAddVertex(endVertex.Position);
+        }
     }
 
 
 
-    private void CalculateInternalPressure(float delta)
+    private void CalculateInternalPressure(SoftbodyState state)
     {
         float newVolume = CalculateVolume();
         _pressure = _mols * _pressureConstant * _temperature / newVolume;
@@ -330,14 +369,14 @@ public partial class SoftbodyMesh : MeshInstance3D
         for (int faceIndex = 0; faceIndex < _faces.Length; faceIndex++)
         {
             SoftbodyFace face = _faces[faceIndex];
-            Vector3 v0 = _vertices[face.V0].Position;
-            Vector3 v1 = _vertices[face.V1].Position;
-            Vector3 v2 = _vertices[face.V2].Position;
+            Vector3 v0 = state.Vertices[face.V0].Position;
+            Vector3 v1 = state.Vertices[face.V1].Position;
+            Vector3 v2 = state.Vertices[face.V2].Position;
 
             Vector3 aveVel = 0.3333f * 
-                            (_vertices[face.V0].Velocity +
-                             _vertices[face.V1].Velocity +
-                             _vertices[face.V2].Velocity);
+                            (state.Vertices[face.V0].Velocity +
+                             state.Vertices[face.V1].Velocity +
+                             state.Vertices[face.V2].Velocity);
             
             // The length of this is twice the area of the tri
             // The direction is the normal of the tri
@@ -348,12 +387,12 @@ public partial class SoftbodyMesh : MeshInstance3D
             Vector3 dragForce = aveVel * (_dragMultiplier * Environment.AirDensity * area * -aveVel.Length());
 
             Vector3 pressureForce = cross * (0.5f * _pressure);
-            _vertices[face.V0].Force += 0.3333f * (pressureForce + dragForce);
-            _vertices[face.V1].Force += 0.3333f * (pressureForce + dragForce);
-            _vertices[face.V2].Force += 0.3333f * (pressureForce + dragForce);
+            state.Vertices[face.V0].Force += 0.3333f * (pressureForce + dragForce);
+            state.Vertices[face.V1].Force += 0.3333f * (pressureForce + dragForce);
+            state.Vertices[face.V2].Force += 0.3333f * (pressureForce + dragForce);
 
 
-            if (Mathf.IsNaN(_vertices[face.V0].Force.Length()))
+            if (Mathf.IsNaN(state.Vertices[face.V0].Force.Length()))
             {
                 GD.Print("Pressure v0");
                 GD.Print($"mols: {_mols}");
@@ -368,14 +407,14 @@ public partial class SoftbodyMesh : MeshInstance3D
                 GD.Print($"area: {area}");
             }
             
-            if (Mathf.IsNaN(_vertices[face.V1].Force.Length())) GD.Print("Pressure v1");
-            if (Mathf.IsNaN(_vertices[face.V2].Force.Length())) GD.Print("Pressure v2");
+            if (Mathf.IsNaN(state.Vertices[face.V1].Force.Length())) GD.Print("Pressure v1");
+            if (Mathf.IsNaN(state.Vertices[face.V2].Force.Length())) GD.Print("Pressure v2");
         }
 
 
-
-        _temperature += 2.0f * (_surfaceArea * delta * (Environment.AirTemperature - _temperature) - _pressure * (newVolume - _volume)) / (3.0f * _mols * _pressureConstant);
-        _volume = newVolume;
+        state.ThermalFlux = _skinThermalConductivity * _surfaceArea * (Environment.AirTemperature - _temperature);
+        state.Temperature += 0.66667f * (-_pressure * (newVolume - _volume)) / (_mols * _pressureConstant);
+        state.Volume = newVolume;
     }
 
 
@@ -386,23 +425,23 @@ public partial class SoftbodyMesh : MeshInstance3D
         for (int faceIndex = 0; faceIndex < _faces.Length; faceIndex++)
         {
             SoftbodyFace face = _faces[faceIndex];
-            Vector3 v0 = _vertices[face.V0].Position;
-            Vector3 v1 = _vertices[face.V1].Position;
-            Vector3 v2 = _vertices[face.V2].Position;
+            Vector3 v0 = _state.Vertices[face.V0].Position;
+            Vector3 v1 = _state.Vertices[face.V1].Position;
+            Vector3 v2 = _state.Vertices[face.V2].Position;
             totalVolume += v2.Dot(v1.Cross(v0));
 
             if (Mathf.IsNaN(totalVolume))
             {
                 GD.Print($"\n\n\nTotal volume face index: {faceIndex}");
-                GD.Print(_vertices[face.V0].Position);
-                GD.Print(_vertices[face.V1].Position);
-                GD.Print(_vertices[face.V2].Position);
+                GD.Print(_state.Vertices[face.V0].Position);
+                GD.Print(_state.Vertices[face.V1].Position);
+                GD.Print(_state.Vertices[face.V2].Position);
                 GD.Print(v1.Cross(v0));
                 GD.Print(v2.Dot(v1.Cross(v0)));
             }
-            if (Mathf.IsNaN(_vertices[face.V0].Position.Length())) GD.Print($"Volume v0: {face.V0}");
-            if (Mathf.IsNaN(_vertices[face.V1].Position.Length())) GD.Print($"Volume v1: {face.V1}");
-            if (Mathf.IsNaN(_vertices[face.V2].Position.Length())) GD.Print($"Volume v2: {face.V2}");
+            if (Mathf.IsNaN(_state.Vertices[face.V0].Position.Length())) GD.Print($"Volume v0: {face.V0}");
+            if (Mathf.IsNaN(_state.Vertices[face.V1].Position.Length())) GD.Print($"Volume v1: {face.V1}");
+            if (Mathf.IsNaN(_state.Vertices[face.V2].Position.Length())) GD.Print($"Volume v2: {face.V2}");
         }
 
         return Mathf.Max(0.16667f * totalVolume, _epsilon);
@@ -410,29 +449,10 @@ public partial class SoftbodyMesh : MeshInstance3D
 
 
 
-    private float CalculateSurfaceArea()
-    {
-        float surfaceArea = 0.0f;
-        for (int faceIndex = 0; faceIndex < _faces.Length; faceIndex++)
-        {
-            SoftbodyFace face = _faces[faceIndex];
-            Vector3 v0 = _vertices[face.V0].Position;
-            Vector3 v1 = _vertices[face.V1].Position;
-            Vector3 v2 = _vertices[face.V2].Position;
-
-            surfaceArea += (v2 - v0).Cross(v1 - v0).Length();
-        }
-
-        return 0.5f * surfaceArea;
-    }
-
-
-
-    private void UpdateVerts(float delta)
+    private void CalculateEnvironment(SoftbodyState state)
     {
         for (int vert = 0; vert < _vertices.Length; vert++)
         {
-
             if (Mathf.IsNaN(_vertices[vert].Force.Length()))
             {
                 GD.Print("Update Verts");
@@ -487,7 +507,7 @@ public partial class SoftbodyMesh : MeshInstance3D
 
 
 
-    private void UpdateMesh()
+    private void UpdateMesh(SoftbodyVertex[] vertices)
     {
         _mesh.SurfaceBegin(Mesh.PrimitiveType.Triangles);
 
@@ -495,7 +515,7 @@ public partial class SoftbodyMesh : MeshInstance3D
         {
             int index = _meshIndices[vert];
 
-            SoftbodyVertex vertex = _vertices[index];
+            IVertex vertex = vertices[index];
             
             _mesh.SurfaceSetNormal(vertex.Normal);
             _mesh.SurfaceSetUV(vertex.UV);
@@ -505,15 +525,20 @@ public partial class SoftbodyMesh : MeshInstance3D
         _mesh.SurfaceEnd();
     }
 
+    private void ShowSprings()
+    {
 
-    private void ApplySpring(Spring spring)
+    }
+
+
+    private void ApplySpring(SoftbodyVertex[] inVector, SoftbodyVertex[] outVector, float dt, Spring spring)
     {
         spring.Stiffness = _k;
         spring.Dampening = _damping;
 
 
-        SoftbodyVertex startVertex = _vertices[spring.StartVertex];
-        SoftbodyVertex endVertex = _vertices[spring.EndVertex];
+        SoftbodyVertex startVertex = inVector[spring.StartVertex];
+        SoftbodyVertex endVertex = inVector[spring.EndVertex];
         
         Vector3 springVector = startVertex.Position - endVertex.Position;
         float springLength = springVector.Length();
@@ -531,16 +556,16 @@ public partial class SoftbodyMesh : MeshInstance3D
         startVertex.Force += hookesFactor + spring.Dampening * startVertDampingVel;
         endVertex.Force += -hookesFactor + spring.Dampening * endVertDampingVel;
 
-        _vertices[spring.StartVertex] = startVertex;
-        _vertices[spring.EndVertex] = endVertex;
+        outVector[spring.StartVertex] = startVertex;
+        outVector[spring.EndVertex] = endVertex;
 
-        if (Mathf.IsNaN(_vertices[spring.StartVertex].Force.Length()))
+        if (Mathf.IsNaN(outVector[spring.StartVertex].Force.Length()))
         {
             GD.Print("Spring start");
             GD.Print($"sv: {springVector}\tsl: {springLength}\tsd: {springDirection}\thf: {hookesFactor}\tsvdv: {startVertDampingVel}\tsvf: {startVertex.Force}\tsvv: {startVertex.Velocity}\tnsvv: {-startVertex.Velocity}");
 
         }
-        if (Mathf.IsNaN(_vertices[spring.EndVertex].Force.Length())) GD.Print("Spring end");
+        if (Mathf.IsNaN(outVector[spring.EndVertex].Force.Length())) GD.Print("Spring end");
 
         _mesh.SurfaceSetNormal(startVertex.Normal);
         _mesh.SurfaceSetUV(startVertex.UV);
