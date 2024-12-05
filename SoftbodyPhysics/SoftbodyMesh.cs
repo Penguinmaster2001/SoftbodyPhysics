@@ -3,7 +3,6 @@ using Godot;
 
 using System;
 using System.Collections.Generic;
-using System.Data;
 
 
 
@@ -57,6 +56,9 @@ public partial class SoftbodyMesh : MeshInstance3D
 
     [Export]
     private float _dragMultiplier;
+
+    [Export]
+    private float _maxForce;
 
     [Export]
     private int _subSteps;
@@ -239,7 +241,7 @@ public partial class SoftbodyMesh : MeshInstance3D
     public override void _PhysicsProcess(double delta)
     {
         if (error) return;
-        GD.Print("frame");
+        // GD.Print("frame");
 
         for (int subStep = 0; subStep < _subSteps; subStep++)
         {
@@ -322,29 +324,11 @@ public partial class SoftbodyMesh : MeshInstance3D
             Vector3 startVertDampingVel = springDirection.LengthSquared() < _epsilonSquared ? Vector3.Zero : -startVertex.Velocity.Project(springDirection);
             Vector3 endVertDampingVel = springDirection.LengthSquared() < _epsilonSquared ? Vector3.Zero : -endVertex.Velocity.Project(springDirection);
 
-            startVertex.Force += hookesFactor + spring.Dampening * startVertDampingVel;
-            endVertex.Force += -hookesFactor + spring.Dampening * endVertDampingVel;
+            startVertex.Force += LimitInfiniteLength(hookesFactor + spring.Dampening * startVertDampingVel, _maxForce);
+            endVertex.Force += LimitInfiniteLength(-hookesFactor + spring.Dampening * endVertDampingVel, _maxForce);
 
             state.Vertices[spring.StartVertex] = startVertex;
             state.Vertices[spring.EndVertex] = endVertex;
-
-            if (Mathf.IsNaN(state.Vertices[spring.StartVertex].Force.Length()))
-            {
-                GD.Print("Spring start");
-                GD.Print($"sv: {springVector}\tsl: {springLength}\tsd: {springDirection}\thf: {hookesFactor}\tsvdv: {startVertDampingVel}\tsvf: {startVertex.Force}\tsvv: {startVertex.Velocity}\tnsvv: {-startVertex.Velocity}");
-
-            }
-            if (Mathf.IsNaN(state.Vertices[spring.EndVertex].Force.Length())) GD.Print("Spring end");
-
-            // _mesh.SurfaceSetNormal(startVertex.Normal);
-            // _mesh.SurfaceSetUV(startVertex.UV);
-            // _mesh.SurfaceSetColor(new(0.01f * springLength / spring.TargetLength, 0.5f, 0.1f));
-            // _mesh.SurfaceAddVertex(startVertex.Position);
-
-            // _mesh.SurfaceSetNormal(endVertex.Normal);
-            // _mesh.SurfaceSetUV(endVertex.UV);
-            // _mesh.SurfaceSetColor(new(0.01f * springLength / spring.TargetLength, 0.5f, 0.1f));
-            // _mesh.SurfaceAddVertex(endVertex.Position);
         }
     }
 
@@ -377,34 +361,16 @@ public partial class SoftbodyMesh : MeshInstance3D
 
             Vector3 dragForce = aveVel * (_dragMultiplier * Environment.AirDensity * area * -aveVel.Length());
 
-            Vector3 pressureForce = cross * (0.5f * state.Pressure);
-            state.Vertices[face.V0].Force += 0.3333f * (pressureForce + dragForce);
-            state.Vertices[face.V1].Force += 0.3333f * (pressureForce + dragForce);
-            state.Vertices[face.V2].Force += 0.3333f * (pressureForce + dragForce);
-
-
-            if (Mathf.IsNaN(state.Vertices[face.V0].Force.Length()))
-            {
-                GD.Print("Pressure v0");
-                GD.Print($"mols: {_mols}");
-                GD.Print($"_pressureConstant: {_pressureConstant}");
-                GD.Print($"_temperature: {state.Temperature}");
-                GD.Print($"newVolume: {newVolume}");
-                GD.Print($"_pressure: {state.Pressure}");
-                GD.Print($"cross: {cross}");
-                GD.Print($"pressureForce: {pressureForce}");
-                GD.Print($"dragForce: {dragForce}");
-                GD.Print($"aveVel: {aveVel}");
-                GD.Print($"area: {area}");
-            }
-            
-            if (Mathf.IsNaN(state.Vertices[face.V1].Force.Length())) GD.Print("Pressure v1");
-            if (Mathf.IsNaN(state.Vertices[face.V2].Force.Length())) GD.Print("Pressure v2");
+            Vector3 pressureForce = cross * ((0.5f * state.Pressure) - Environment.AirPressure);
+            Vector3 forcePerVertex = LimitInfiniteLength(0.3333f * (pressureForce + dragForce), _maxForce);
+            state.Vertices[face.V0].Force += forcePerVertex;
+            state.Vertices[face.V1].Force += forcePerVertex;
+            state.Vertices[face.V2].Force += forcePerVertex;
         }
 
 
-        state.ThermalFlux = _skinThermalConductivity * state.SurfaceArea * (Environment.AirTemperature - state.Temperature);
-        state.Temperature += 0.66667f * (-state.Pressure * (newVolume - state.Volume)) / (_mols * _pressureConstant);
+        state.ThermalFlux = Mathf.Clamp(_skinThermalConductivity * state.SurfaceArea * (Environment.AirTemperature - state.Temperature), -_maxForce, _maxForce);
+        state.Temperature = Mathf.Clamp(state.Temperature + (0.66667f * (-state.Pressure * (newVolume - state.Volume)) / (_mols * _pressureConstant)), 0.0f, _maxForce);
         state.Volume = newVolume;
     }
 
@@ -420,19 +386,6 @@ public partial class SoftbodyMesh : MeshInstance3D
             Vector3 v1 = _state.Vertices[face.V1].Position;
             Vector3 v2 = _state.Vertices[face.V2].Position;
             totalVolume += v2.Dot(v1.Cross(v0));
-
-            if (Mathf.IsNaN(totalVolume))
-            {
-                GD.Print($"\n\n\nTotal volume face index: {faceIndex}");
-                GD.Print(_state.Vertices[face.V0].Position);
-                GD.Print(_state.Vertices[face.V1].Position);
-                GD.Print(_state.Vertices[face.V2].Position);
-                GD.Print(v1.Cross(v0));
-                GD.Print(v2.Dot(v1.Cross(v0)));
-            }
-            if (Mathf.IsNaN(_state.Vertices[face.V0].Position.Length())) GD.Print($"Volume v0: {face.V0}");
-            if (Mathf.IsNaN(_state.Vertices[face.V1].Position.Length())) GD.Print($"Volume v1: {face.V1}");
-            if (Mathf.IsNaN(_state.Vertices[face.V2].Position.Length())) GD.Print($"Volume v2: {face.V2}");
         }
 
         return Mathf.Max(0.16667f * totalVolume, _epsilon);
@@ -446,12 +399,6 @@ public partial class SoftbodyMesh : MeshInstance3D
 
         for (int vert = 0; vert < state.Vertices.Length; vert++)
         {
-            if (Mathf.IsNaN(state.Vertices[vert].Force.Length()))
-            {
-                GD.Print("Update Verts");
-                error = true;
-            }
-            
             // Gravity per vertex
             state.Vertices[vert].Force += (state.Vertices[vert].Mass + state.GasMass / state.Vertices.Length) * Environment.Gravity;
 
@@ -487,8 +434,34 @@ public partial class SoftbodyMesh : MeshInstance3D
         _mesh.SurfaceEnd();
     }
 
+
+
     private void ShowSprings()
     {
+        // _mesh.SurfaceSetNormal(startVertex.Normal);
+        // _mesh.SurfaceSetUV(startVertex.UV);
+        // _mesh.SurfaceSetColor(new(0.01f * springLength / spring.TargetLength, 0.5f, 0.1f));
+        // _mesh.SurfaceAddVertex(startVertex.Position);
 
+        // _mesh.SurfaceSetNormal(endVertex.Normal);
+        // _mesh.SurfaceSetUV(endVertex.UV);
+        // _mesh.SurfaceSetColor(new(0.01f * springLength / spring.TargetLength, 0.5f, 0.1f));
+        // _mesh.SurfaceAddVertex(endVertex.Position);
+    }
+
+
+
+    private static Vector3 LimitInfiniteLength(Vector3 vector, float length)
+    {
+        if (!vector.IsFinite())
+        {
+            vector = new() {
+                X = float.IsNegativeInfinity(vector.X) ? -1.0f : (float.IsPositiveInfinity(vector.X) ? 1.0f : 0.0f),
+                Y = float.IsNegativeInfinity(vector.Y) ? -1.0f : (float.IsPositiveInfinity(vector.Y) ? 1.0f : 0.0f),
+                Z = float.IsNegativeInfinity(vector.Z) ? -1.0f : (float.IsPositiveInfinity(vector.Z) ? 1.0f : 0.0f)
+            };
+        }
+
+        return vector.LimitLength(length);
     }
 }

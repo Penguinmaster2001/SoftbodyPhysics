@@ -17,4 +17,7 @@ public partial class SoftbodyEnvironment: Node3D
 
     [Export]
     public float AirDensity;
+
+    [Export]
+    public float AirPressure;
 }
