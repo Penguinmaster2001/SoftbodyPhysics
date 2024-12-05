@@ -241,7 +241,6 @@ public partial class SoftbodyMesh : MeshInstance3D
     public override void _PhysicsProcess(double delta)
     {
         if (error) return;
-        // GD.Print("frame");
 
         for (int subStep = 0; subStep < _subSteps; subStep++)
         {
@@ -269,7 +268,7 @@ public partial class SoftbodyMesh : MeshInstance3D
 
     private SoftbodyState CalculateDerivatives(SoftbodyState state)
     {
-        SoftbodyState newState = state;//new(state);
+        SoftbodyState newState = state;
         CalculateSprings(ref newState);
         CalculateInternalPressure(ref newState);
         CalculateEnvironment(ref newState);
@@ -408,7 +407,7 @@ public partial class SoftbodyMesh : MeshInstance3D
             if (ToGlobal(state.Vertices[vert].Position).Y < 0.0f)
             {
                 state.Vertices[vert].Force *= 0.5f;
-                state.Vertices[vert].Force += 1.5f * state.Vertices[vert].Force.Y *state.Vertices[vert].Mass * ToGlobal(state.Vertices[vert].Position).Y * Vector3.Up;
+                state.Vertices[vert].Force += 1.5f * state.Vertices[vert].Force.Y * state.Vertices[vert].Mass * ToGlobal(state.Vertices[vert].Position).Y * Vector3.Up;
                 state.Vertices[vert].Position = ToLocal(ToGlobal(state.Vertices[vert].Position) * new Vector3(1.0f, 0.0f, 1.0f));
             }
         }
@@ -420,16 +419,34 @@ public partial class SoftbodyMesh : MeshInstance3D
     {
         _mesh.SurfaceBegin(Mesh.PrimitiveType.Triangles);
 
-        for (int vert = 0; vert < _meshIndices.Length; vert++)
+        for (int faceIndex = 0; faceIndex < _faces.Length; faceIndex++)
         {
-            int index = _meshIndices[vert];
+            SoftbodyFace face = _faces[faceIndex];
+            Vector3 v0 = _state.Vertices[face.V0].Position;
+            Vector3 v1 = _state.Vertices[face.V1].Position;
+            Vector3 v2 = _state.Vertices[face.V2].Position;
 
-            IVertex vertex = vertices[index];
-            
-            _mesh.SurfaceSetNormal(vertex.Normal);
-            _mesh.SurfaceSetUV(vertex.UV);
-            _mesh.SurfaceAddVertex(vertex.Position);
+            Vector3 normal = (v2 - v0).Cross(v1 - v0).Normalized();
+
+            _mesh.SurfaceSetNormal(normal);
+            _mesh.SurfaceAddVertex(v0);
+
+            _mesh.SurfaceSetNormal(normal);
+            _mesh.SurfaceAddVertex(v1);
+
+            _mesh.SurfaceSetNormal(normal);
+            _mesh.SurfaceAddVertex(v2);
         }
+
+        // for (int vert = 0; vert < _meshIndices.Length; vert++)
+        // {
+        //     int index = _meshIndices[vert];
+
+        //     IVertex vertex = vertices[index];
+            
+        //     _mesh.SurfaceSetNormal(vertex.Normal);
+        //     _mesh.SurfaceAddVertex(vertex.Position);
+        // }
         
         _mesh.SurfaceEnd();
     }
@@ -438,15 +455,29 @@ public partial class SoftbodyMesh : MeshInstance3D
 
     private void ShowSprings()
     {
-        // _mesh.SurfaceSetNormal(startVertex.Normal);
-        // _mesh.SurfaceSetUV(startVertex.UV);
-        // _mesh.SurfaceSetColor(new(0.01f * springLength / spring.TargetLength, 0.5f, 0.1f));
-        // _mesh.SurfaceAddVertex(startVertex.Position);
+        _mesh.SurfaceBegin(Mesh.PrimitiveType.Lines);
 
-        // _mesh.SurfaceSetNormal(endVertex.Normal);
-        // _mesh.SurfaceSetUV(endVertex.UV);
-        // _mesh.SurfaceSetColor(new(0.01f * springLength / spring.TargetLength, 0.5f, 0.1f));
-        // _mesh.SurfaceAddVertex(endVertex.Position);
+        for (int springIndex = 0; springIndex < _springs.Length; springIndex++)
+        {
+            Spring spring = _springs[springIndex];
+
+            SoftbodyVertex startVertex = _state.Vertices[spring.StartVertex];
+            SoftbodyVertex endVertex = _state.Vertices[spring.EndVertex];
+            
+            float springLength = (startVertex.Position - endVertex.Position).Length();
+            
+            _mesh.SurfaceSetNormal(startVertex.Normal);
+            _mesh.SurfaceSetUV(startVertex.UV);
+            _mesh.SurfaceSetColor(new(0.01f * springLength / spring.TargetLength, 0.5f, 0.1f));
+            _mesh.SurfaceAddVertex(startVertex.Position);
+
+            _mesh.SurfaceSetNormal(endVertex.Normal);
+            _mesh.SurfaceSetUV(endVertex.UV);
+            _mesh.SurfaceSetColor(new(0.01f * springLength / spring.TargetLength, 0.5f, 0.1f));
+            _mesh.SurfaceAddVertex(endVertex.Position);
+        }
+        
+        _mesh.SurfaceEnd();
     }
 
 
