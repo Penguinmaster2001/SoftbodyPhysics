@@ -2,7 +2,7 @@
 
 [ext_resource type="Script" path="res://SoftbodyPhysics/SoftbodyMesh.cs" id="1_3lrfq"]
 [ext_resource type="Script" path="res://SoftbodyPhysics/SoftbodyEnvironment.cs" id="1_bbltp"]
-[ext_resource type="ArrayMesh" uid="uid://cm2r5dobupyo3" path="res://Meshes/icosphere.obj" id="2_nfo3d"]
+[ext_resource type="ArrayMesh" uid="uid://c565qby0tk8fi" path="res://Meshes/torus.obj" id="3_s07b7"]
 
 [sub_resource type="StandardMaterial3D" id="StandardMaterial3D_q4sy3"]
 cull_mode = 2
@@ -16,6 +16,7 @@ albedo_color = Color(1, 0, 0, 1)
 
 [node name="Softbody" type="Node3D"]
 script = ExtResource("1_bbltp")
+Gravity = Vector3(0, -9.81, 0)
 AirTemperature = 1.0
 AirDensity = 1.0
 
@@ -23,16 +24,15 @@ AirDensity = 1.0
 material_override = SubResource("StandardMaterial3D_q4sy3")
 script = ExtResource("1_3lrfq")
 Environment = NodePath("..")
-_baseMesh = ExtResource("2_nfo3d")
+_baseMesh = ExtResource("3_s07b7")
 _springMat = SubResource("StandardMaterial3D_boec2")
-_k = 5.0
+_k = 1.0
 _initialSkinAreaMass = 0.2
 _damping = 1.0
 _pressureConstant = 10.0
 _mols = 1.0
-_temperature = 1.0
 _skinThermalConductivity = 1.0
 _gasMolDensity = 1.0
 _dragMultiplier = 0.05
-_subSteps = 10
-_timeSpeed = 0.1
+_subSteps = 5
+_timeSpeed = 0.02
