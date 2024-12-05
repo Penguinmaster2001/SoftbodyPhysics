@@ -49,7 +49,7 @@ public struct SoftbodyState
 
         for (int vert = 0; vert < state.Vertices.Length; vert++)
         {
-            Vector3 dv = state.Vertices[vert].Force * (dt / state.Vertices[vert].Mass);
+            Vector3 dv = state.Vertices[vert].Force * (dt / state.Vertices[vert].InitialArea);
             newState.Vertices[vert] = new() {
                 Position = (state.Vertices[vert].Velocity + dv * 0.5f) * dt,
                 Velocity = dv,
@@ -78,7 +78,7 @@ public struct SoftbodyState
             newState.Vertices[vert] = new() {
                 Position = stateA.Vertices[vert].Position + stateB.Vertices[vert].Position,
                 Velocity = stateA.Vertices[vert].Velocity + stateB.Vertices[vert].Velocity,
-                Mass = stateA.Vertices[vert].Mass,
+                InitialArea = stateA.Vertices[vert].InitialArea,
                 UV = stateA.Vertices[vert].UV,
                 Normal = stateA.Vertices[vert].Normal
             };

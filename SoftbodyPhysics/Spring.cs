@@ -7,7 +7,7 @@ public struct Spring
 {
     public int StartVertex;
     public int EndVertex;
-    public float Stiffness;
+    public float LengthAreaCoefficient;
     public float Dampening;
     public float TargetLength;
 
@@ -15,6 +15,6 @@ public struct Spring
 
     public override readonly string ToString()
     {
-        return $"Spring from {StartVertex} to {EndVertex}. Stiffness: {Stiffness}. Dampening: {Dampening}. TargetLength: {TargetLength}";
+        return $"Spring from {StartVertex} to {EndVertex}. LengthAreaCoefficient: {LengthAreaCoefficient}. Dampening: {Dampening}. TargetLength: {TargetLength}";
     }
 }

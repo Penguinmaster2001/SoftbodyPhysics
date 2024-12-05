@@ -3,6 +3,7 @@ using Godot;
 
 using System;
 using System.Collections.Generic;
+using System.Data;
 
 
 
@@ -31,7 +32,7 @@ public partial class SoftbodyMesh : MeshInstance3D
     private Material _springMat;
 
     [Export]
-    private float _k;
+    private float _youngsModulus;
 
     [Export]
     private float _initialSkinAreaMass;
@@ -100,28 +101,10 @@ public partial class SoftbodyMesh : MeshInstance3D
                 Position = meshDataTool.GetVertex(vert),
                 UV = meshDataTool.GetVertexUV(vert),
                 Normal = meshDataTool.GetVertexNormal(vert),
-                Mass = 0.0f
+                InitialArea = 0.0f
             };
         }
         _state.Vertices = vertices;
-        
-
-        Spring[] springs = new Spring[meshDataTool.GetEdgeCount()];
-        for (int edge = 0; edge < meshDataTool.GetEdgeCount(); edge++)
-        {
-            int startVert = meshDataTool.GetEdgeVertex(edge, 0);
-            int endVert = meshDataTool.GetEdgeVertex(edge, 1);
-
-            springs[edge] = new() {
-                    StartVertex = startVert,
-                    EndVertex = endVert,
-                    Stiffness = _k,
-                    Dampening = _damping,
-                    TargetLength = meshDataTool.GetVertex(startVert)
-                                               .DistanceTo(meshDataTool.GetVertex(endVert))
-                };
-        }
-        _springs = springs;
 
 
         SoftbodyFace[] faces = new SoftbodyFace[meshDataTool.GetFaceCount()];
@@ -136,13 +119,33 @@ public partial class SoftbodyMesh : MeshInstance3D
             Vector3 v1 = vertices[faces[face].V1].Position;
             Vector3 v2 = vertices[faces[face].V2].Position;
 
-            float faceMassPerVert = 0.3333f * _initialSkinAreaMass * 0.5f * (v2 - v0).Cross(v1 - v0).Length();
+            float faceAreaPerVert = 0.3333f * 0.5f * (v2 - v0).Cross(v1 - v0).Length();
 
-            vertices[faces[face].V0].Mass += faceMassPerVert;
-            vertices[faces[face].V1].Mass += faceMassPerVert;
-            vertices[faces[face].V2].Mass += faceMassPerVert;
+            vertices[faces[face].V0].InitialArea += faceAreaPerVert;
+            vertices[faces[face].V1].InitialArea += faceAreaPerVert;
+            vertices[faces[face].V2].InitialArea += faceAreaPerVert;
         }
         _faces = faces;
+        
+
+        Spring[] springs = new Spring[meshDataTool.GetEdgeCount()];
+        for (int edge = 0; edge < meshDataTool.GetEdgeCount(); edge++)
+        {
+            int startVert = meshDataTool.GetEdgeVertex(edge, 0);
+            int endVert = meshDataTool.GetEdgeVertex(edge, 1);
+
+            float startLength = meshDataTool.GetVertex(startVert).DistanceTo(meshDataTool.GetVertex(endVert));
+            float springArea = _state.Vertices[startVert].InitialArea + _state.Vertices[endVert].InitialArea;
+
+            springs[edge] = new() {
+                    StartVertex = startVert,
+                    EndVertex = endVert,
+                    LengthAreaCoefficient = springArea / startLength,
+                    Dampening = _damping,
+                    TargetLength = startLength
+                };
+        }
+        _springs = springs;
 
 
         _mesh = new();
@@ -238,18 +241,29 @@ public partial class SoftbodyMesh : MeshInstance3D
 
     bool error = false;
     bool render = true;
+    bool doRk4 = false;
     public override void _PhysicsProcess(double delta)
     {
         if (error) return;
-
+        
+        float dt = (float)(_timeSpeed * delta / _subSteps);
         for (int subStep = 0; subStep < _subSteps; subStep++)
         {
-            UpdateRk4((float)(_timeSpeed * delta / _subSteps));
+            if (doRk4) UpdateRk4(dt);
+            else UpdateEuler(dt);
         }
 
         _mesh.ClearSurfaces();
         if (render) UpdateMesh(_state.Vertices);
         else ShowSprings();
+    }
+
+
+
+    private void UpdateEuler(float dt)
+    {
+        SoftbodyState k1 = CalculateDerivatives(_state);
+        _state += dt * k1;
     }
 
 
@@ -291,6 +305,10 @@ public partial class SoftbodyMesh : MeshInstance3D
                 case Key.P:
                     render = !render;
                     break;
+                case Key.E:
+                    doRk4 = !doRk4;
+                    GD.Print($"doRk4: {doRk4}");
+                    break;
             }
         }
     }
@@ -303,7 +321,6 @@ public partial class SoftbodyMesh : MeshInstance3D
         {
             Spring spring = _springs[springIndex];
 
-            spring.Stiffness = _k;
             spring.Dampening = _damping;
 
 
@@ -318,7 +335,7 @@ public partial class SoftbodyMesh : MeshInstance3D
             }
 
             Vector3 springDirection = springVector / springLength;
-            Vector3 hookesFactor = spring.Stiffness * (spring.TargetLength - springLength) * springDirection;
+            Vector3 hookesFactor = spring.LengthAreaCoefficient * _youngsModulus * (spring.TargetLength - springLength) * springDirection;
 
             Vector3 startVertDampingVel = springDirection.LengthSquared() < _epsilonSquared ? Vector3.Zero : -startVertex.Velocity.Project(springDirection);
             Vector3 endVertDampingVel = springDirection.LengthSquared() < _epsilonSquared ? Vector3.Zero : -endVertex.Velocity.Project(springDirection);
@@ -399,7 +416,7 @@ public partial class SoftbodyMesh : MeshInstance3D
         for (int vert = 0; vert < state.Vertices.Length; vert++)
         {
             // Gravity per vertex
-            state.Vertices[vert].Force += (state.Vertices[vert].Mass + state.GasMass / state.Vertices.Length) * Environment.Gravity;
+            state.Vertices[vert].Force += ((state.Vertices[vert].InitialArea * _initialSkinAreaMass) + state.GasMass / state.Vertices.Length) * Environment.Gravity;
 
             // Buoyancy per vertex
             state.Vertices[vert].Force += Environment.AirDensity * state.Volume / -state.Vertices.Length * Environment.Gravity;
@@ -407,7 +424,7 @@ public partial class SoftbodyMesh : MeshInstance3D
             if (ToGlobal(state.Vertices[vert].Position).Y < 0.0f)
             {
                 state.Vertices[vert].Force *= 0.5f;
-                state.Vertices[vert].Force += 1.5f * state.Vertices[vert].Force.Y * state.Vertices[vert].Mass * ToGlobal(state.Vertices[vert].Position).Y * Vector3.Up;
+                state.Vertices[vert].Force += 1.5f * state.Vertices[vert].Force.Y * state.Vertices[vert].InitialArea * ToGlobal(state.Vertices[vert].Position).Y * Vector3.Up;
                 state.Vertices[vert].Position = ToLocal(ToGlobal(state.Vertices[vert].Position) * new Vector3(1.0f, 0.0f, 1.0f));
             }
         }
@@ -422,9 +439,9 @@ public partial class SoftbodyMesh : MeshInstance3D
         for (int faceIndex = 0; faceIndex < _faces.Length; faceIndex++)
         {
             SoftbodyFace face = _faces[faceIndex];
-            Vector3 v0 = _state.Vertices[face.V0].Position;
-            Vector3 v1 = _state.Vertices[face.V1].Position;
-            Vector3 v2 = _state.Vertices[face.V2].Position;
+            Vector3 v0 = vertices[face.V0].Position;
+            Vector3 v1 = vertices[face.V1].Position;
+            Vector3 v2 = vertices[face.V2].Position;
 
             Vector3 normal = (v2 - v0).Cross(v1 - v0).Normalized();
 
@@ -437,16 +454,6 @@ public partial class SoftbodyMesh : MeshInstance3D
             _mesh.SurfaceSetNormal(normal);
             _mesh.SurfaceAddVertex(v2);
         }
-
-        // for (int vert = 0; vert < _meshIndices.Length; vert++)
-        // {
-        //     int index = _meshIndices[vert];
-
-        //     IVertex vertex = vertices[index];
-            
-        //     _mesh.SurfaceSetNormal(vertex.Normal);
-        //     _mesh.SurfaceAddVertex(vertex.Position);
-        // }
         
         _mesh.SurfaceEnd();
     }
