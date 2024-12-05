@@ -35,6 +35,9 @@ public partial class SoftbodyMesh : MeshInstance3D
     private float _youngsModulus;
 
     [Export]
+    private float _preCompress;
+
+    [Export]
     private float _initialSkinAreaMass;
 
     [Export]
@@ -241,7 +244,7 @@ public partial class SoftbodyMesh : MeshInstance3D
 
     bool error = false;
     bool render = true;
-    bool doRk4 = false;
+    bool doRk4 = true;
     public override void _PhysicsProcess(double delta)
     {
         if (error) return;
@@ -252,7 +255,12 @@ public partial class SoftbodyMesh : MeshInstance3D
             if (doRk4) UpdateRk4(dt);
             else UpdateEuler(dt);
         }
+    }
 
+
+
+    public override void _Process(double delta)
+    {
         _mesh.ClearSurfaces();
         if (render) UpdateMesh(_state.Vertices);
         else ShowSprings();
@@ -305,7 +313,7 @@ public partial class SoftbodyMesh : MeshInstance3D
                 case Key.P:
                     render = !render;
                     break;
-                case Key.E:
+                case Key.L:
                     doRk4 = !doRk4;
                     GD.Print($"doRk4: {doRk4}");
                     break;
@@ -335,7 +343,7 @@ public partial class SoftbodyMesh : MeshInstance3D
             }
 
             Vector3 springDirection = springVector / springLength;
-            Vector3 hookesFactor = spring.LengthAreaCoefficient * _youngsModulus * (spring.TargetLength - springLength) * springDirection;
+            Vector3 hookesFactor = spring.LengthAreaCoefficient * _youngsModulus * (spring.TargetLength - (springLength * _preCompress)) * springDirection;
 
             Vector3 startVertDampingVel = springDirection.LengthSquared() < _epsilonSquared ? Vector3.Zero : -startVertex.Velocity.Project(springDirection);
             Vector3 endVertDampingVel = springDirection.LengthSquared() < _epsilonSquared ? Vector3.Zero : -endVertex.Velocity.Project(springDirection);
