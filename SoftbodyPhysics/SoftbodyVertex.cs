@@ -11,7 +11,6 @@ public struct SoftbodyVertex : IVertex
 {
     public Vector3 Position { get; set; }
     public Vector3 Velocity;
-    public Vector3 Force;
     public float InitialArea;
 
     public Vector2 UV { get; set; }
@@ -21,6 +20,6 @@ public struct SoftbodyVertex : IVertex
 
     public override readonly string ToString()
     {
-        return $"SoftbodyVertex at {Position}\tVelocity: {Velocity}\tForce: {Force}\tMass: {InitialArea}";
+        return $"SoftbodyVertex at {Position}\tVelocity: {Velocity}\tMass: {InitialArea}";
     }
 }

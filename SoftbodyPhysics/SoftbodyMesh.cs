@@ -3,7 +3,6 @@ using Godot;
 
 using System;
 using System.Collections.Generic;
-using System.Data;
 
 
 
@@ -144,7 +143,7 @@ public partial class SoftbodyMesh : MeshInstance3D
                     StartVertex = startVert,
                     EndVertex = endVert,
                     LengthAreaCoefficient = springArea / startLength,
-                    Dampening = _damping,
+                    Damping = _damping,
                     TargetLength = startLength
                 };
         }
@@ -270,31 +269,48 @@ public partial class SoftbodyMesh : MeshInstance3D
 
     private void UpdateEuler(float dt)
     {
-        SoftbodyState k1 = CalculateDerivatives(_state);
-        _state += dt * k1;
+        SoftbodyGradient k1 = CalculateGradient(_state);
+        _state = TimeStepGradient(_state, k1, dt);
     }
 
 
 
     private void UpdateRk4(float dt)
     {
-        SoftbodyState k1 = CalculateDerivatives(_state);
-        SoftbodyState k2 = CalculateDerivatives(_state + (0.5f * dt * k1));
-        SoftbodyState k3 = CalculateDerivatives(_state + (0.5f * dt * k2));
-        SoftbodyState k4 = CalculateDerivatives(_state + (dt * k3));
+        SoftbodyGradient k1 = CalculateGradient(_state);
+        SoftbodyGradient k2 = CalculateGradient(TimeStepGradient(_state, k1, 0.5f * dt));
+        SoftbodyGradient k3 = CalculateGradient(TimeStepGradient(_state, k2, 0.5f * dt));
+        SoftbodyGradient k4 = CalculateGradient(TimeStepGradient(_state, k3, dt));
 
-        _state += dt / 6.0f * (k1 + (2.0f * k2) + (2.0f * k3) + k4);
+        _state = TimeStepGradient(_state, k1 + (2.0f * k2) + (2.0f * k3) + k4, 0.166667f * dt);
     }
 
 
 
-    private SoftbodyState CalculateDerivatives(SoftbodyState state)
+    private SoftbodyGradient CalculateGradient(SoftbodyState state)
+    {
+        SoftbodyGradient gradient = new(state.Vertices.Length);
+        CalculateSprings(ref state, ref gradient);
+        CalculateInternalPressure(ref state, ref gradient);
+        CalculateEnvironment(ref state, ref gradient);
+        
+        return gradient;
+    }
+
+
+
+    public SoftbodyState TimeStepGradient(SoftbodyState state, SoftbodyGradient gradient, float dt)
     {
         SoftbodyState newState = state;
-        CalculateSprings(ref newState);
-        CalculateInternalPressure(ref newState);
-        CalculateEnvironment(ref newState);
-        
+        newState.Temperature += dt * gradient.ThermalFlux;
+
+        for (int vert = 0; vert < newState.Vertices.Length; vert++)
+        {
+            Vector3 dv = gradient.Vertices[vert].Force * (dt / (newState.Vertices[vert].InitialArea * _initialSkinAreaMass));
+            newState.Vertices[vert].Position += (newState.Vertices[vert].Velocity + dv * 0.5f) * dt;
+            newState.Vertices[vert].Velocity += dv;
+        }
+
         return newState;
     }
 
@@ -323,13 +339,13 @@ public partial class SoftbodyMesh : MeshInstance3D
 
 
 
-    private void CalculateSprings(ref SoftbodyState state)
+    private void CalculateSprings(ref SoftbodyState state, ref SoftbodyGradient gradient)
     {
         for (int springIndex = 0; springIndex < _springs.Length; springIndex++)
         {
             Spring spring = _springs[springIndex];
 
-            spring.Dampening = _damping;
+            spring.Damping = _damping;
 
 
             SoftbodyVertex startVertex = state.Vertices[spring.StartVertex];
@@ -348,17 +364,14 @@ public partial class SoftbodyMesh : MeshInstance3D
             Vector3 startVertDampingVel = springDirection.LengthSquared() < _epsilonSquared ? Vector3.Zero : -startVertex.Velocity.Project(springDirection);
             Vector3 endVertDampingVel = springDirection.LengthSquared() < _epsilonSquared ? Vector3.Zero : -endVertex.Velocity.Project(springDirection);
 
-            startVertex.Force += LimitInfiniteLength(hookesFactor + spring.Dampening * startVertDampingVel, _maxForce);
-            endVertex.Force += LimitInfiniteLength(-hookesFactor + spring.Dampening * endVertDampingVel, _maxForce);
-
-            state.Vertices[spring.StartVertex] = startVertex;
-            state.Vertices[spring.EndVertex] = endVertex;
+            gradient.Vertices[spring.StartVertex].Force += LimitInfiniteLength(hookesFactor + spring.Damping * startVertDampingVel, _maxForce);
+            gradient.Vertices[spring.EndVertex].Force += LimitInfiniteLength(-hookesFactor + spring.Damping * endVertDampingVel, _maxForce);
         }
     }
 
 
 
-    private void CalculateInternalPressure(ref SoftbodyState state)
+    private void CalculateInternalPressure(ref SoftbodyState state, ref SoftbodyGradient gradient)
     {
         float newVolume = CalculateVolume();
         state.Pressure = _mols * _pressureConstant * state.Temperature / newVolume;
@@ -387,13 +400,13 @@ public partial class SoftbodyMesh : MeshInstance3D
 
             Vector3 pressureForce = cross * ((0.5f * state.Pressure) - Environment.AirPressure);
             Vector3 forcePerVertex = LimitInfiniteLength(0.3333f * (pressureForce + dragForce), _maxForce);
-            state.Vertices[face.V0].Force += forcePerVertex;
-            state.Vertices[face.V1].Force += forcePerVertex;
-            state.Vertices[face.V2].Force += forcePerVertex;
+            gradient.Vertices[face.V0].Force += forcePerVertex;
+            gradient.Vertices[face.V1].Force += forcePerVertex;
+            gradient.Vertices[face.V2].Force += forcePerVertex;
         }
 
 
-        state.ThermalFlux = Mathf.Clamp(_skinThermalConductivity * state.SurfaceArea * (Environment.AirTemperature - state.Temperature), -_maxForce, _maxForce);
+        gradient.ThermalFlux = Mathf.Clamp(_skinThermalConductivity * state.SurfaceArea * (Environment.AirTemperature - state.Temperature), -_maxForce, _maxForce);
         state.Temperature = Mathf.Clamp(state.Temperature + (0.66667f * (-state.Pressure * (newVolume - state.Volume)) / (_mols * _pressureConstant)), 0.0f, _maxForce);
         state.Volume = newVolume;
     }
@@ -417,22 +430,22 @@ public partial class SoftbodyMesh : MeshInstance3D
 
 
 
-    private void CalculateEnvironment(ref SoftbodyState state)
+    private void CalculateEnvironment(ref SoftbodyState state, ref SoftbodyGradient gradient)
     {
         state.GasMass = _mols * _gasMolDensity;
 
         for (int vert = 0; vert < state.Vertices.Length; vert++)
         {
             // Gravity per vertex
-            state.Vertices[vert].Force += ((state.Vertices[vert].InitialArea * _initialSkinAreaMass) + state.GasMass / state.Vertices.Length) * Environment.Gravity;
+            gradient.Vertices[vert].Force += ((state.Vertices[vert].InitialArea * _initialSkinAreaMass) + state.GasMass / state.Vertices.Length) * Environment.Gravity;
 
             // Buoyancy per vertex
-            state.Vertices[vert].Force += Environment.AirDensity * state.Volume / -state.Vertices.Length * Environment.Gravity;
+            gradient.Vertices[vert].Force += Environment.AirDensity * state.Volume / state.Vertices.Length * -Environment.Gravity;
 
             if (ToGlobal(state.Vertices[vert].Position).Y < 0.0f)
             {
-                state.Vertices[vert].Force *= 0.5f;
-                state.Vertices[vert].Force += 1.5f * state.Vertices[vert].Force.Y * state.Vertices[vert].InitialArea * ToGlobal(state.Vertices[vert].Position).Y * Vector3.Up;
+                gradient.Vertices[vert].Force *= 0.5f;
+                gradient.Vertices[vert].Force += 1.5f * gradient.Vertices[vert].Force.Y * state.Vertices[vert].InitialArea * ToGlobal(state.Vertices[vert].Position).Y * Vector3.Up;
                 state.Vertices[vert].Position = ToLocal(ToGlobal(state.Vertices[vert].Position) * new Vector3(1.0f, 0.0f, 1.0f));
             }
         }
