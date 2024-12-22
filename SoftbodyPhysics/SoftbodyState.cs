@@ -1,10 +1,4 @@
 
-using Godot;
-
-using System;
-
-
-
 namespace GodotSoftbodyPhysics.SoftbodyPhysics;
 
 

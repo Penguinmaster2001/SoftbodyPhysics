@@ -16,6 +16,7 @@ albedo_color = Color(1, 0, 0, 1)
 
 [node name="Softbody" type="Node3D"]
 script = ExtResource("1_bbltp")
+Gravity = Vector3(0, -9.81, 0)
 AirTemperature = 1.0
 AirDensity = 1.0
 AirPressure = 1.0

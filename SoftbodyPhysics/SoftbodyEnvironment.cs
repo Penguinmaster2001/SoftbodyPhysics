@@ -7,17 +7,17 @@ namespace GodotSoftbodyPhysics.SoftbodyPhysics;
 
 
 
-public partial class SoftbodyEnvironment: Node3D
+public partial class SoftbodyEnvironment: Node3D, ISoftbodyEnvironment
 {
     [Export]
-    public Vector3 Gravity;
+    public Vector3 Gravity { get; set; }
 
     [Export]
-    public float AirTemperature;
+    public float AirTemperature { get; set; }
 
     [Export]
-    public float AirDensity;
+    public float AirDensity { get; set; }
 
     [Export]
-    public float AirPressure;
+    public float AirPressure { get; set; }
 }
